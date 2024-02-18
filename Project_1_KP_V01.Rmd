@@ -1,0 +1,395 @@
+---
+title: "DATA 607-Project1"
+author: "Koohyar Pooladvand K00HPy"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is a week 4 project 1, working with strings. The project is
+explained below after the initialization section.
+
+## Code Initialization
+
+In the first section of the code like, I ensure all the relevant
+packages are installed and libraries are loaded.
+
+```{r, Code_initialization, echo=FALSE}
+required_packages <- c("RSQLite","devtools","tidyverse","DBI","dplyr","odbc","openintro","ggplot2","psych","reshape2","knitr","markdown","shiny","R.rsp","fivethirtyeight","RCurl", "stringr","readr","glue","data.table") # Specify packages
+
+not_installed <- required_packages[!(required_packages %in% installed.packages()[ , "Package"])]# Extract not installed packages
+if(length(not_installed)==0){
+  print("All required packages are installed")
+} else {
+  print(paste(length(not_installed), "package(s) had to be installed.")) # print the list of packages that need to be isstall
+  install.packages(not_installed)
+}
+
+```
+
+## Project 1: description
+
+In this project, We're given a text file with chess tournament results where the information has some structure. We need to create an R Markdown file that generates a .CSV file (that could for example be imported into a SQL database)with the following information for all of the players:
+
+| Player’s Name | Player’s State | Total Number of Points | Player’s Pre-Rating | Average Pre Chess Rating of Opponents For the first player |
+|------------|------------|------------|------------|-------------------------|
+| Gary Hua      | ON             | 6.0                    | 1794                | 1605\*                                                     |
+|               |                |                        |                     |                                                            |
+|               |                |                        |                     |                                                            |
+
+\*1605 was calculated by using the pre-tournament opponents’ ratings of 
+1436, 1563, 1600, 1610, 1649, 1663, 1716, and dividing by the total
+number of games played. 
+
+
+## Step 1: Importing the data and read it into the RStudio
+
+We use the data presented in previous assignment to read the file into the RStudio.
+
+```{r read_txt_fle, echo=TRUE}
+
+# I wanted to create a function that takes an address as input. The function should first try to load the file from a local location. If that fails, it should then attempt to load the file from an assumed web address. Finally, if both attempts are unsuccessful, the function should prompt the operator to choose a file manually from their local computer. 
+
+load_file_KP <- function(file_name) {
+  # Attempt to load the file
+  file_data <- tryCatch({
+    # Try to read from a local file
+    if (file.exists(file_name)) {
+      # Read the local file
+      con <- file(file_name, "r")
+      lines <- readLines(con, encoding = "unknown")
+      close(con)
+      return(list(data = lines, message = "File loaded successfully,", method = "Local"))
+    } else {
+      # Attempt to read from a URL
+      web_file <- tryCatch({
+        readLines(file_name)
+      }, error = function(e) {
+        NULL  # Return NULL to indicate failure
+      })
+      if (!is.null(web_file)) {
+        return(list(data = web_file, message = "File loaded successfully, ", method = "Web"))
+      }
+    }
+    NULL  # Return NULL to indicate failure
+  }, error = function(e) {
+    NULL  # Return NULL to indicate failure
+  })
+  
+  # If loading the file was not successful, prompt the operator to select a file manually
+  if (is.null(file_data)) {
+    file_path <- file.choose()  # Prompt to choose a file
+    # Read the file if a file path was selected
+    if (file_path != "") {
+      manual_file <- tryCatch({
+        readLines(file_path)
+      }, error = function(e) {
+        NULL  # Return NULL to indicate failure
+      })
+      if (!is.null(manual_file)) {
+        return(list(data = manual_file, message = "Manual file loaded successfully, ", method = "Manual"))
+      }
+    } else {
+      stop("No file selected. Exiting.")  # Stop execution if no file was selected
+    }
+  }
+  
+  # Return the file data
+  return(file_data)
+}
+
+#read the data into RStudio from DATA folder  
+
+#test written function 
+#local file
+file_name_1 <- "Data/tournamentinfo.txt"
+#result <- load_file_KP(file_name_1)
+
+#test erroneous local file error 
+file_name_2 <- "test.txt"
+# run the function to load the file: 
+#result <- load_file_KP(file_name_2)
+
+#test GitHub
+file_name_3 <- "https://raw.githubusercontent.com/koohpi/DATA607_Project1/main/Data/tournamentinfo.txt"
+# run the function to load the file: 
+#result <- load_file_KP(file_name_3)
+# Erroneous GihHub link
+file_name_4 <- "https://xxxx/tournamentinfo.txt"
+#result <- load_file_KP(file_name_4)
+
+# run the function to load the file: 
+result <- load_file_KP(file_name_3)
+
+lines <- result$data #pass loaded data to lines 
+# Print the result
+cat("\n", "The number of lines in the file that has been read are ", No_read_lines <-  length(lines),"\n")
+
+paste(result$message, "using", result$method, "method.", sep = " ") #use past 
+
+cat("\n", "Here is the frist line of the laoded file:", "\n")
+
+print(head(lines))  # Print first few lines of the file data
+
+```
+
+## Step 2: creating the structure of the data
+
+In this section of the code, I define the structure of the dataframes to be used later for loading the data. We divided them into two dataframes, one that has the players' information and the other that contains the results of the each rounds.
+
+```{r Text_Manipulation, echo=TRUE}
+
+#First let's create the structure of the dataframes 
+
+#Inizializing the DataFrame
+DF <- data.frame(
+  name         = character(0),
+  player_no    = numeric(0),
+  state        = character(0),
+  USCF_ID      = numeric(0),
+  rate_pre     = numeric(0),
+  rate_post    = numeric(0),
+  round_no     = numeric(0),
+  round_status = character(0),
+  counter_plyr = numeric(0)
+  )
+
+#Player record DF stores the information about the players 
+Player_DF <- data.frame(
+  player_no    = numeric(0),  
+  name         = character(0),
+  state        = character(0),
+  USCF_ID      = numeric(0),
+  rate_pre     = numeric(0),
+  rate_post    = numeric(0)
+  )
+
+#Game record DF stores reach individual game data as a row in DF
+Game_DF <- data.frame(
+  player1_no   = numeric(0),
+  player2_no   = numeric(0),
+  round_no     = numeric(0),
+  round_status = character(0)
+  )
+
+```
+
+## Step 3: Extract the data into RStudio
+
+In this section, the data loaded into RStudio is read into a nested list. Regular expressions (regex) are used based on the data structure to separate the data. Since each data block is enclosed by dashlines, these dashlines serve as separators for the nested list. The number of dashline blocks determines the count, and since each block contains two rows, the resulting list will also have the same number of rows.
+
+Later, we utilize this loaded data and apply a similar regex pattern to separate it. This time, the vertical bar (|) ("\|") is used as the delimiter.
+
+```{r extract_data, echo=TRUE}
+
+# Initialize variables to store data
+data <- list()
+current_section <- 0
+
+#Use the dashlines to separate the data, data between dashlines are stored in list of characters with two members 
+for (line in lines) {
+  if (grepl("^-+$", line)) {  # Check if the line contains only dashes
+    # If a new section begins, increment the section counter
+    current_section <- current_section + 1
+    data[[current_section]] <- list()  # Initialize list for the new section
+  } else if (current_section > 0) {
+    data[[current_section]][[length(data[[current_section]]) + 1]] <- line
+  }
+}
+
+#When data is filtered using dashline, it may not correctly structured for the later code to be in form of a nested list like data[[i]][[1]] or [[2]]
+# Check the structure and ensure it is all correctly set up. 
+
+# Clean the data structure
+cleaned_data <- list()
+
+#look for data with short length than not containing characters and skip if any 
+for (i in seq_along(data)) {
+  if (length(data[[i]]) == 2 && is.character(data[[i]][[1]]) && is.character(data[[i]][[2]])) {
+    cleaned_data[[length(cleaned_data) + 1]] <- data[[i]]
+  } else {
+    next  # Skip to the next iteration
+  }
+}
+
+# Remove empty elements from cleaned_data
+cleaned_data <- cleaned_data[lengths(cleaned_data) > 0]
+
+# Assign cleaned_data back to data
+data <- cleaned_data
+#clear up some memory 
+rm(cleaned_data)
+
+#lengths(data)  # report the size of the collected data 
+#now that the data is collected, let's go through each line in sequence and extract data and store them in  the previously created dataframe. 
+
+#first line of code we want to separate using "|" 
+
+for (i in 1:length(data)){
+      # Split the line into individual elements using "|" as delimiter
+      elements <- strsplit(data[[i]][[1]], "\\|")[[1]]
+      # Remove white spaces from each element
+      elements <- trimws(elements)
+      # Remove empty elements
+      elements <- elements[elements != ""]
+      # Store the elements in the data list
+      data[[i]][[1]] <- elements
+      
+      # Split the line into individual elements using "|" as delimiter
+      elements <- strsplit(data[[i]][[2]], "\\|")[[1]]
+      # Remove white spaces from each element
+      elements <- trimws(elements)
+      # Remove empty elements
+      elements <- elements[elements != ""]
+      # Store the elements in the data list
+      data[[i]][[2]] <- elements
+}
+
+#player_DF store the information abotu the players 
+DF_length <- length(data)-1
+
+Player_DF <- data.frame(
+  player_no    = numeric(0),  
+  name         = character(0),
+  state        = character(0),
+  USCF_ID      = numeric(0),
+  rate_pre     = numeric(0),
+  rate_post    = numeric(0),
+  total_point  = numeric(0)
+  )
+
+
+#Game_record
+Game_DF <- data.frame(
+  player1_no   = numeric(0),
+  player2_no   = numeric(0),
+  round_no     = numeric(0),
+  round_status = character(0)
+  )
+
+for (i in 2:length(data)){
+    # Append the player number to the 'player_no' column in
+  'Player_DF'
+#  print(i)
+  Player_DF[i-1,"player_no"] <-  as.numeric(data[[i]][[1]][[1]])
+  Player_DF[i-1,"name"] <-  data[[i]][[1]][[2]]
+  Player_DF[i-1,"state"] <-  data[[i]][[2]][[1]]
+  numbers <- as.numeric(unlist(regmatches(data[[i]][[2]][[2]],gregexpr("\\d+", data[[i]][[2]][[2]]))))
+  Player_DF[i-1,"USCF_ID"] <-  numbers[1]
+  Player_DF[i-1,"rate_pre"] <-  numbers[2]
+  Player_DF[i-1,"rate_post"] <-  numbers[3]
+  Player_DF[i-1,"total_point"] <-  as.numeric(data[[i]][[1]][[3]])
+  for(j in 4:length(data[[i]][[1]])){
+#    print(j)
+    Game_DF[(i-2)*7+j-3,1] <- as.numeric(data[[i]][[1]][[1]])
+    # Extract numbers and letters using regular expressions
+    matches <- regmatches(data[[i]][[1]][[j]], 
+                          gregexpr("[A-Za-z]+|\\d+",
+                                   data[[i]][[1]][[j]]))
+    if (length(matches[[1]]) >= 2) {
+      Game_DF[(i-2)*7+j-3, 2] <- as.numeric(matches[[1]][[2]])
+      } else {
+        Game_DF[(i-2)*7+j-3, 2] <- NA
+        }
+    Game_DF[(i-2)*7+j-3,3] <- j-3
+    Game_DF[(i-2)*7+j-3,4] <- matches[[1]][[1]]
+    }
+  }
+
+```
+
+## Step 4: Stored data into two CSV files and start Analyses like they are CSV files
+
+In this part of the code, for the purpose of reproducibility, I create two separate CSV files. Later, I will read these files to import them into two new dataframes. The goal is to write the data to local files and then read them as needed.
+
+```{r write_output_files, echo=TRUE}
+
+# Write data frame to a CSV file
+write.csv(Game_DF, "Game_Data.csv", row.names = FALSE)
+# Write data frame to a CSV file
+write.csv(Player_DF, "Player_data.csv", row.names = FALSE)
+
+#Read the imported file into a new DataFrame 
+
+New_Game_DF <- read.csv("Game_Data.csv")
+New_Player_DF <- read.csv("Player_data.csv")
+
+```
+
+## Step 5: Data Manipulation
+
+Now that the data has been loaded and reloaded into two new dataframes, it’s time to perform the analyses. The data structure has been split into two files, resembling a SQL structure: one contains player data, and the other contains game results. In this section of the code, we will create the requested data for each user. Specifically, we’ll start by using the data from New_Game_DF to identify opponents who played against the player of interest. Then, we’ll calculate the average pre-rating for those opponents using New_Player_DF, as requested. and finally store all in a new DF called average_rating and write it as CSV file with the same name. 
+
+```{r data_nalyses, echo=TRUE}
+#Load dplyr library to use group_by and filter 
+library(dplyr)
+
+#sumamrise if not a good option, reframe apparantly it a better way  
+#player_no_played<- New_Game_DF|>group_by(New_Game_DF$player1_no)|>
+#  filter(!is.na(player2_no))|>
+#  filter(round_status == "W" | round_status == "L" | round_status #== "D")|> summarise(
+#    player_numer = player1_no,
+#    n            = n())
+
+# Filter New_Game_DF based on conditions
+
+Player_filtered <- New_Game_DF%>%
+  group_by(player1_no)%>%
+  filter(!is.na(player2_no) & (round_status %in% c("W", "L", "D")))%>%
+  reframe(
+    player_list = list(player2_no[1:length(player2_no)]),
+    n          = n()
+  )
+
+#2nd method, I could not get it to work unfortunately
+player2_list <- New_Game_DF%>%
+  group_by(player1_no)%>%
+  filter(!is.na(player2_no) & (round_status %in% c("W", "L", "D")))%>%
+  pull(player2_no)
+
+# If you want to calculate the average rating from New_Player_DF for these player numbers:
+#follwing did not work 
+
+#average_rating <- New_Player_DF %>%
+#  filter(player_no %in% Player_filtered$player_list) %>%
+#  summarise(average_rating = mean(rate_pre))
+
+#create the dataframe 
+average_rating <- data.frame(
+  player_name       = character(0),
+  player_state      = character(0),
+  Total_No_Points   = numeric(0),  
+  Player_Pre_Rating = numeric(0),
+  Average_Rating    = numeric(0)
+  )
+
+for (i in seq_along(Player_filtered$player1_no)){
+  result <- New_Player_DF %>%
+  filter(player_no %in% Player_filtered$player_list[[i]]) %>%
+  reframe(
+   player_name     = New_Player_DF$name[Player_filtered$player1_no[i]],
+    player_state   = New_Player_DF$state[Player_filtered$player1_no[i]],
+   Total_No_Points = New_Player_DF$total_point[Player_filtered$player1_no[i]],
+   Player_Pre_Rating= New_Player_DF$rate_pre[Player_filtered$player1_no[i]],
+    Average_Rating = round(mean(rate_pre),0))
+ 
+  average_rating <- rbind(average_rating, result)
+}
+
+# Write data frame to a CSV file
+write.csv(average_rating, "Average_rating_report.csv", row.names = FALSE)
+
+```
+
+It was an interesting challenge, and I enjoyed it. Although I’m not entirely sure if I’ve used the best methods, I found it quite challenging. In the end, I used several nested for loops and intermediary data to obtain the results. Thanks!
+
+-K00HPy
+
