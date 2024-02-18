@@ -29,7 +29,7 @@ not_installed <- required_packages[!(required_packages %in% installed.packages()
 if(length(not_installed)==0){
   print("All required packages are installed")
 } else {
-  print(paste(length(not_installed), "package(s) had to be installed.")) # print the list of packages that need to be isstall
+  print(paste(length(not_installed), "package(s) had to be installed.")) # print the list of packages that need to be installed
   install.packages(not_installed)
 }
 
@@ -253,7 +253,7 @@ for (i in 1:length(data)){
       data[[i]][[2]] <- elements
 }
 
-#player_DF store the information abotu the players 
+#player_DF store the information about the players 
 DF_length <- length(data)-1
 
 Player_DF <- data.frame(
